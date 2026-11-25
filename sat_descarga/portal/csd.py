@@ -77,6 +77,17 @@ def _mismo_par(cer_der: bytes, key_bytes: bytes, password: str) -> bool:
     return spki(cert.public_key()) == spki(key.public_key())
 
 
+# Espera del número de operación tras subir el archivo: el SAT suele tardar
+# segundos, pero si cortamos antes de tiempo el trámite queda sin número.
+_ESPERA_NUMERO_MS = 240_000
+_TXT_SOLICITUD_ANTERIOR = "pertenece a una solicitud anterior"
+_TXT_ERROR_SOLICITUD = "error durante su solicitud"
+
+
+class SolicitudAnteriorError(ErrorEsperado):
+    """El SAT ya tiene registrado ESTE archivo: reenviarlo siempre rebota."""
+
+
 class CSDPortalClient:
     """Cliente para enviar el `.sdg` y recuperar el CSD emitido (portal e.firma).
 
@@ -302,16 +313,30 @@ class CSDPortalClient:
         page.click('input[name="enviar"]', no_wait_after=True)
 
         try:
-            page.wait_for_selector('input[name="numeroOperacion"]', timeout=60_000)
+            # El número, o el rechazo del SAT (para no agotar la espera).
+            page.wait_for_selector(
+                'input[name="numeroOperacion"]:visible, '
+                f':text("{_TXT_SOLICITUD_ANTERIOR}"):visible, '
+                f':text("{_TXT_ERROR_SOLICITUD}"):visible',
+                timeout=_ESPERA_NUMERO_MS,
+            )
+            con_numero = page.locator('input[name="numeroOperacion"]').count() > 0
         except PWTimeout:
+            con_numero = False
+        if not con_numero:
             try:
-                cuerpo = page.inner_text("body", timeout=5_000)[:400].strip()
+                cuerpo = page.inner_text("body", timeout=5_000)[:2000].strip()
             except Exception:  # noqa: BLE001 — la página colgada no debe tapar el error
                 cuerpo = "(la página del SAT no respondió)"
+            if _TXT_SOLICITUD_ANTERIOR in " ".join(cuerpo.lower().split()):
+                raise SolicitudAnteriorError(
+                    "El SAT rechazó el archivo porque pertenece a una solicitud anterior: "
+                    "ya lo tiene registrado y reenviarlo no sirve."
+                )
             raise RuntimeError(
                 "El SAT no devolvió número de operación tras subir el archivo. "
-                "A veces es un error transitorio del portal; reintenta. "
-                f"Pantalla: «{cuerpo}»"
+                "Pudo haber recibido la solicitud: antes de reintentar, revisa si ya "
+                f'emitió tu certificado. Pantalla: "{cuerpo}"'
             )
         # El SAT rinde el número en un input visible Y uno hidden (mismo valor) →
         # `.first` evita el strict-mode violation de Playwright.

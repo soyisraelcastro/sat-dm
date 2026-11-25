@@ -137,6 +137,14 @@ la e.firma anterior en `efirma/{RFC}/anterior_{stamp}/` antes de sustituir.
 El CSD no necesita etapa "generada": es repetible y no destructivo (un `.sdg`
 regenerado solo produce otro sello).
 
+**Rechazo por "solicitud anterior"** (visto con el SAT real, 2026-11-24): si el
+SAT registró el `.ren` sin que leyéramos el número, reenviarlo siempre rebota. Se
+guarda `rechazada_en` y la UI pide buscar el certificado (`/renovar/recuperar`,
+con todas las llaves del trámite). Solo si la FIEL más reciente que publica el SAT
+es la vigente se guarda `verificada_en` y, durante una hora, se permite
+`POST /renovar/generar` con `otra: true`. La solicitud anterior pasa a
+`anteriores[]` y sus archivos nunca se borran.
+
 **Contraseña del CSD** (decisión de producto 2026-07-09): la elige el usuario en
 el wizard (mín. 8) y se guarda en el **keychain** (`csd:{RFC}`) **y** en un
 `.txt` junto a la `.key` (`*_contraseña.txt`) — excepción consciente a la regla

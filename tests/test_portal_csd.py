@@ -73,3 +73,43 @@ def test_cerrar_sesion_nunca_lanza(cliente):
     context = MagicMock()
     context.new_page.side_effect = RuntimeError("contexto cerrado")
     cliente._cerrar_sesion(context)
+
+
+def _pagina_real(html):
+    """Corre `_subir_sdg` contra un formulario local que responde `html`."""
+    # La ruta del navegador se fija ANTES de importar Playwright.
+    if not setup._navegadores_instalados(setup.configurar_playwright_browsers_path()):
+        pytest.skip("sin Chromium")
+    sync = pytest.importorskip("playwright.sync_api")
+    with sync.sync_playwright() as p:
+        b = setup.lanzar_chromium(p, headless=True)
+        try:
+            page = b.new_page()
+            form = ('<meta charset="utf-8"><form method="post" enctype="multipart/form-data">'
+                    '<input type="file" id="f" name="f"><input type="submit" name="enviar"></form>')
+            page.route("**/*", lambda r: r.fulfill(
+                content_type="text/html; charset=utf-8",
+                body=form if r.request.method == "GET" else html))
+            k = csd.CSDPortalClient("x.cer", "x.key", "x")
+            k.MENU_URL, k.FILE_INPUT = "http://sat.test/", "#f"
+            return k._subir_sdg(page, __file__)
+        finally:
+            b.close()
+
+
+def test_numero_de_operacion_con_input_oculto_duplicado():
+    html = ('<input name="numeroOperacion" value="123">'
+            '<input type="hidden" name="numeroOperacion" value="123">')
+    assert _pagina_real(html) == "123"
+
+
+def test_solicitud_anterior_se_reconoce_sin_agotar_la_espera():
+    with pytest.raises(csd.SolicitudAnteriorError, match="reenviarlo no sirve"):
+        _pagina_real("<p>¡Ocurrió un error durante su solicitud! Este requerimiento "
+                     "pertenece a una\n solicitud anterior, favor de solicitar su seguimiento</p>")
+
+
+def test_otro_error_del_sat_no_es_solicitud_anterior():
+    with pytest.raises(RuntimeError, match="Pudo haber recibido") as e:
+        _pagina_real("<p>¡Ocurrió un error durante su solicitud! Certificado inválido</p>")
+    assert not isinstance(e.value, csd.SolicitudAnteriorError)
