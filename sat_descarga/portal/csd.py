@@ -21,9 +21,11 @@ e.firma no tiene captcha). Requiere playwright (+ chromium).
 
 import datetime
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
+from ..core.errores import ErrorEsperado
 from .login import iniciar_sesion_fiel
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ CSD_URL_ENTRADA_FIEL = (
 # login (loginc.mat...), así que un `in url` da falso positivo y "aterriza" sin
 # haber entrado (bug detectado en prueba 3).
 CSD_LANDING_HOST = "aplicacionesc.mat.sat.gob.mx"
+# Cierre de sesión del NIDP (ruta estándar del proveedor de identidad).
+NIDP_LOGOUT_URL = "https://loginc.mat.sat.gob.mx/nidp/app/logout"
+# Lo que muestra el NIDP cuando el contribuyente juntó demasiadas sesiones abiertas.
+_TEXTO_TOPE_SESIONES = "maximum number of allowable sessions"
 
 
 def _aterrizo_en_certisat(url: str) -> bool:
@@ -181,6 +187,7 @@ class CSDPortalClient:
                     self._emitir("cer", path=str(cer) if cer else None)
                 return res
             finally:
+                self._cerrar_sesion(context)
                 browser.close()
 
     def recuperar(
@@ -217,6 +224,7 @@ class CSDPortalClient:
                 self._emitir("cer", path=str(cer) if cer else None)
                 return {"cer": cer}
             finally:
+                self._cerrar_sesion(context)
                 browser.close()
 
     # ------------------------------------------------------------------
@@ -243,6 +251,8 @@ class CSDPortalClient:
                 return
             except RuntimeError as e:
                 ultimo = e
+            # Con el tope de sesiones, reintentar solo lo prolonga.
+            self._revisar_tope_sesiones(page)
             # Recuperación rápida: si quedamos en el NIDP (autenticados pero sin
             # aterrizar), forzar el home de CertiSAT con la sesión ya establecida.
             if "loginc.mat.sat.gob.mx" in page.url:
@@ -254,14 +264,35 @@ class CSDPortalClient:
                         return
                 except PWTimeout:
                     pass
+                self._revisar_tope_sesiones(page)
             logger.warning("[%s] login intento %d/%d no aterrizó (%s); reintento…",
                            self.ETIQUETA, intento, intentos, page.url[:70])
         raise RuntimeError(f"No se pudo entrar a CertiSAT tras {intentos} intentos: {ultimo}")
 
+    def _revisar_tope_sesiones(self, page):
+        """Lanza `ErrorEsperado` si el NIDP rechazó el login por tope de sesiones."""
+        try:
+            texto = page.inner_text("body", timeout=5_000)
+        except Exception:  # noqa: BLE001 — sin pantalla legible no hay nada que revisar
+            return
+        if _TEXTO_TOPE_SESIONES in texto.lower():
+            raise ErrorEsperado(
+                "El SAT tiene demasiadas sesiones abiertas con esta e.firma. Espera "
+                "alrededor de una hora sin entrar al portal y vuelve a intentarlo."
+            )
+
+    def _cerrar_sesion(self, context):
+        """Cierra la sesión del NIDP (best-effort): cerrar el navegador no la libera en
+        el SAT y, al juntarse varias, el portal rechaza los logins siguientes."""
+        try:
+            page = context.new_page()
+            page.goto(NIDP_LOGOUT_URL, wait_until="domcontentloaded", timeout=10_000)
+        except Exception as e:  # noqa: BLE001 — nunca debe tapar el resultado del trámite
+            logger.info("[%s] no se pudo cerrar la sesión del SAT: %s", self.ETIQUETA, e)
+
     def _subir_sdg(self, page, sdg_path: str) -> str:
         """Sube el archivo del trámite (`.sdg`/`.ren`) y devuelve el número de
         operación (o lanza si el SAT no lo dio)."""
-        import os
         from playwright.sync_api import TimeoutError as PWTimeout
 
         page.goto(self.MENU_URL, wait_until="domcontentloaded")
@@ -273,7 +304,10 @@ class CSDPortalClient:
         try:
             page.wait_for_selector('input[name="numeroOperacion"]', timeout=60_000)
         except PWTimeout:
-            cuerpo = (page.inner_text("body")[:400] if page else "").strip()
+            try:
+                cuerpo = page.inner_text("body", timeout=5_000)[:400].strip()
+            except Exception:  # noqa: BLE001 — la página colgada no debe tapar el error
+                cuerpo = "(la página del SAT no respondió)"
             raise RuntimeError(
                 "El SAT no devolvió número de operación tras subir el archivo. "
                 "A veces es un error transitorio del portal; reintenta. "

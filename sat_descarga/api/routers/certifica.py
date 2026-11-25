@@ -410,7 +410,10 @@ def renovar_efirma(req: RenovarRequest):
             ren_path, key_nueva = _generar_ren(rfc, fiel, password, correo, salida, reusar)
             emitir_fase("firmando")     # la firma CMS ocurrió dentro del .ren
 
+            fases: set[str] = set()
+
             def puente(fase, data):
+                fases.add(fase)
                 emitir_fase(fase, data)
                 if fase == "numero_operacion":
                     # El SAT ya tiene el trámite: etapa "enviada". Si la app muere
@@ -448,6 +451,10 @@ def renovar_efirma(req: RenovarRequest):
                 # Se busca en «Recuperación de certificados» el último cert del
                 # RFC y se verifica que EMPAREJE con nuestra .key (criptográfico,
                 # sin falsos positivos): si empareja, la renovación ya ocurrió.
+                # Si ni siquiera hubo login, el chequeo (mismo login) tampoco entraría:
+                # solo gastaría más sesiones del SAT, que las limita.
+                if "login_ok" not in fases:
+                    raise
                 cer_rescatado = _verificar_renovacion_procesada(
                     empresa, password, salida, key_nueva, emitir_fase,
                 )

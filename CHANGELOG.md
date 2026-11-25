@@ -6,6 +6,13 @@
 
 _Cambios mergeados a `main` aún no etiquetados; el release de la semana los promueve._
 
+### Fix
+
+- **Renovar e.firma y tramitar CSD fallaban antes de subir el archivo al SAT.** Faltaba un
+  import en `portal/csd.py` (`name 'os' is not defined`). Además se cierra la sesión del SAT
+  al terminar, el tope de sesiones se avisa con un mensaje claro en vez de reintentar, y una
+  página colgada tras subir el archivo ya no tapa el error real.
+
 ## [2.5.0] - 2026-10-23
 
 ### Feature

@@ -384,6 +384,7 @@ class TestRenovarFlujo:
             return {"key": key, "ren": ren}
 
         def enviar_caido(cer, key, password, ren, on_progreso=None, **kw):
+            on_progreso("login_ok", {})
             raise RuntimeError("El portal del SAT no respondió")
 
         def recuperar_sin_cert(*args, **kw):
@@ -400,6 +401,41 @@ class TestRenovarFlujo:
         assert data["estado"] == "error"
         assert "no respondió" in data["error"]  # el error original, no el del chequeo
         assert config_store.get_renovacion_pendiente(rfc)["etapa"] == "generada"
+
+    def test_sin_login_no_gasta_otra_sesion_en_el_chequeo(
+        self, client, monkeypatch, test_cer, test_key, test_password, vigente,
+    ):
+        """Si el login falló, el chequeo de respaldo (mismo login) no corre."""
+        rfc = _alta_fiel(client, test_cer, test_key, test_password)
+
+        def fake_generar(fiel, correo=None, password=None, salida_dir=None):
+            d = Path(salida_dir); d.mkdir(parents=True, exist_ok=True)
+            key = d / "Claveprivada_FIEL_nueva.key"
+            shutil.copy2(test_key, key)
+            ren = d / "Renovacion_FIEL.ren"
+            ren.write_bytes(b"REN")
+            return {"key": key, "ren": ren}
+
+        def sin_login(*args, **kw):
+            raise RuntimeError("No se pudo entrar a CertiSAT")
+
+        chequeos = []
+
+        def recuperar(*args, **kw):
+            chequeos.append(1)
+            return {"cer": None}
+
+        monkeypatch.setattr("sat_descarga.certifica.generar_renovacion_fiel", fake_generar)
+        monkeypatch.setattr("sat_descarga.portal.renovacion.enviar_renovacion_fiel", sin_login)
+        monkeypatch.setattr("sat_descarga.portal.renovacion.recuperar_renovacion_fiel", recuperar)
+
+        r = client.post("/renovar", json={
+            "rfc": rfc, "password": test_password, "confirmar": True,
+        })
+        data = _esperar_job(client, r.json()["job_id"])
+        assert data["estado"] == "error"
+        assert "No se pudo entrar" in data["error"]
+        assert chequeos == []
 
     def test_recuperar_en_generada_sin_cert_dice_que_no_llego(
         self, client, monkeypatch, tmp_path, test_cer, test_key, test_password,
