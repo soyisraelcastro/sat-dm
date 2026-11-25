@@ -35,7 +35,7 @@ const FASES_RENOVAR: FaseItem[] = [
   { label: 'Firmando con tu e.firma vigente…', fases: ['firmando'] },
   {
     label: 'Enviando la solicitud al SAT (CertiSAT)…',
-    fases: ['enviando', 'login_ok', 'subiendo', 'numero_operacion', 'acuse'],
+    fases: ['enviando', 'login_ok', 'subiendo', 'numero_operacion', 'acuse', 'rechazada'],
   },
   {
     label: 'Descargando tu nuevo certificado (el SAT tarda unos minutos)…',
@@ -95,6 +95,8 @@ export function RenovarEfirmaWizard({
   const [generando, setGenerando] = useState(false);
   const [bajandoRespaldo, setBajandoRespaldo] = useState(false);
   const [respaldoBajado, setRespaldoBajado] = useState(false);
+  // El SAT rechazó la solicitud anterior y el usuario pidió generar otra.
+  const [otra, setOtra] = useState(false);
   const [errorPaso, setErrorPaso] = useState<string | null>(null);
   // Algo cambió en el catálogo (solicitud generada, enviada o e.firma nueva):
   // al cerrar, el padre refresca.
@@ -104,7 +106,8 @@ export function RenovarEfirmaWizard({
   // 'enviada' (hay número de operación) → solo falta descargar el cert.
   // 'generada' → el SAT no la ha recibido; se envía la MISMA con POST /renovar.
   const pendienteEnviada = !!pendiente?.numero_operacion;
-  const pendienteGenerada = !!pendiente && !pendiente.numero_operacion;
+  const pendienteRechazada = !!pendiente?.rechazada_en && !pendienteEnviada;
+  const pendienteGenerada = !!pendiente && !pendienteEnviada && !pendienteRechazada;
   const sem = semaforoVencimiento(empresa.vencimiento);
   const vencida = sem?.vencida ?? false;
 
@@ -129,6 +132,7 @@ export function RenovarEfirmaWizard({
     setPassword('');
     setAcepto(false);
     setRespaldoBajado(false);
+    setOtra(false);
     setErrorPaso(null);
     setCambio(false);
     job.reset();
@@ -144,7 +148,8 @@ export function RenovarEfirmaWizard({
     setGenerando(true);
     setErrorPaso(null);
     try {
-      await apiClient.renovarGenerar({ rfc: empresa.rfc, password });
+      await apiClient.renovarGenerar({ rfc: empresa.rfc, password, ...(otra ? { otra } : {}) });
+      setOtra(false); // volver atrás reutiliza la recién generada
       setCambio(true);
       setRespaldoBajado(false);
       setAcepto(false);
@@ -194,6 +199,17 @@ export function RenovarEfirmaWizard({
     );
   }
 
+  function generarOtra() {
+    job.reset(); // si no, el 'done' de la búsqueda brincaría el paso de envío
+    setCambio(true);
+    setOtra(true);
+    setPassword('');
+    setErrorPaso(null);
+    setPaso(1);
+  }
+
+  const rechazada = job.estado === 'error' && job.fase === 'rechazada';
+
   // Si el .ren ya se envió (hay número de operación), NUNCA re-enviar.
   const yaEnviada = modo === 'recuperar' || (!!job.fase && FASES_POST_ENVIO.has(job.fase));
 
@@ -202,7 +218,7 @@ export function RenovarEfirmaWizard({
     else renovar();
   }
 
-  const puedeContinuar = !vencida && !pendienteEnviada;
+  const puedeContinuar = !vencida && !pendienteEnviada && !pendienteRechazada;
   const enviarListo = respaldoBajado && acepto;
 
   return (
@@ -232,6 +248,16 @@ export function RenovarEfirmaWizard({
                   <span className="font-mono">{pendiente.numero_operacion}</span>). Solo
                   falta descargar el certificado que emitió el SAT: lo buscamos en su
                   Recuperación de certificados, que te pide resolver un captcha.
+                </AlertDescription>
+              </Alert>
+            ) : pendienteRechazada ? (
+              <Alert variant="warning">
+                <AlertTitle>El SAT rechazó tu solicitud</AlertTitle>
+                <AlertDescription>
+                  Dice que pertenece a una solicitud anterior, así que reenviarla no
+                  sirve. Primero buscamos si ya emitió tu certificado nuevo (te pide
+                  un captcha); si no, podrás generar otra solicitud. Tu llave
+                  anterior se conserva.
                 </AlertDescription>
               </Alert>
             ) : pendienteGenerada ? (
@@ -302,6 +328,11 @@ export function RenovarEfirmaWizard({
                 <Button onClick={recuperar}>
                   <Icon icon="ph:download-simple-light" className="size-4" />
                   Descargar certificado
+                </Button>
+              ) : pendienteRechazada ? (
+                <Button onClick={recuperar}>
+                  <Icon icon="ph:magnifying-glass-light" className="size-4" />
+                  Buscar mi certificado
                 </Button>
               ) : vencida ? (
                 <>
@@ -381,7 +412,7 @@ export function RenovarEfirmaWizard({
             {errorPaso && <p className="text-xs text-destructive">{errorPaso}</p>}
 
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setPaso(0)}>
+              <Button type="button" variant="ghost" onClick={() => { setOtra(false); setPaso(0); }}>
                 Atrás
               </Button>
               <Button type="submit" disabled={password.length < 4 || generando}>
@@ -494,7 +525,12 @@ export function RenovarEfirmaWizard({
                 {/* Tranquilidad ante el portal caído: el progreso queda guardado
                     y el reintento continúa desde la etapa donde se atoró. */}
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  {yaEnviada ? (
+                  {rechazada ? (
+                    <>
+                      Busca tu certificado nuevo (te pide un captcha). Si el SAT no lo ha
+                      emitido, podrás generar otra solicitud; tu llave anterior se conserva.
+                    </>
+                  ) : yaEnviada ? (
                     <>
                       Tu avance quedó guardado: al reintentar solo buscamos tu
                       certificado nuevo, nunca se reenvía la solicitud. También puedes
@@ -523,16 +559,23 @@ export function RenovarEfirmaWizard({
                   <Button variant="ghost" onClick={() => handleOpenChange(false)}>
                     Cerrar
                   </Button>
-                  {!yaEnviada && (
+                  {rechazada ? (
+                    <Button onClick={recuperar}>
+                      <Icon icon="ph:magnifying-glass-light" className="size-4" />
+                      Buscar mi certificado
+                    </Button>
+                  ) : !yaEnviada && (
                     <Button variant="outline" onClick={recuperar}>
                       <Icon icon="ph:magnifying-glass-light" className="size-4" />
                       Buscar mi certificado
                     </Button>
                   )}
-                  <Button onClick={reintentar}>
-                    <Icon icon="ph:arrow-clockwise-light" className="size-4" />
-                    Reintentar
-                  </Button>
+                  {!rechazada && (
+                    <Button onClick={reintentar}>
+                      <Icon icon="ph:arrow-clockwise-light" className="size-4" />
+                      Reintentar
+                    </Button>
+                  )}
                 </>
               ) : null}
             </DialogFooter>
@@ -555,7 +598,7 @@ export function RenovarEfirmaWizard({
                 />
               </span>
               <h3 className="text-lg font-extrabold tracking-tight">
-                {resultado.renovada ? 'e.firma renovada' : 'Tu certificado está en camino'}
+                {resultado.renovada ? 'e.firma renovada' : resultado.rechazada ? 'No encontramos un certificado nuevo' : 'Tu certificado está en camino'}
               </h3>
               <p className="mt-1.5 max-w-[46ch] text-[13px] leading-relaxed text-muted-foreground">
                 {resultado.renovada ? (
@@ -630,12 +673,19 @@ export function RenovarEfirmaWizard({
               ) : (
                 <>
                   <Button variant="ghost" onClick={() => handleOpenChange(false)}>
-                    Bajar después
+                    {resultado.rechazada ? 'Cerrar' : 'Bajar después'}
                   </Button>
-                  <Button onClick={recuperar}>
-                    <Icon icon="ph:download-simple-light" className="size-4" />
-                    Descargar certificado
-                  </Button>
+                  {resultado.puede_generar_otra && !vencida ? (
+                    <Button onClick={generarOtra}>
+                      <Icon icon="ph:arrow-clockwise-light" className="size-4" />
+                      Generar otra solicitud
+                    </Button>
+                  ) : (
+                    <Button onClick={recuperar}>
+                      <Icon icon="ph:download-simple-light" className="size-4" />
+                      {resultado.rechazada ? 'Buscar otra vez' : 'Descargar certificado'}
+                    </Button>
+                  )}
                 </>
               )}
             </DialogFooter>

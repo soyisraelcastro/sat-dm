@@ -26,7 +26,7 @@ mapea a la checklist del wizard: generando → firmando → enviando → numero_
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -61,6 +61,7 @@ class RenovarGenerarRequest(BaseModel):
     rfc: str
     password: str                      # contraseña de la e.firma VIGENTE
     correo: Optional[str] = None
+    otra: bool = False                 # el SAT rechazó la anterior: generar una NUEVA
 
 
 class RenovarRecuperarRequest(BaseModel):
@@ -87,6 +88,9 @@ class CsdRecuperarRequest(BaseModel):
 # Intentos (cada 30 s) de bajar el cert renovado en la misma sesión del envío.
 _INTENTOS_CERT_EN_SESION = 20
 
+# Vigencia de la búsqueda sin certificado que habilita generar otra solicitud.
+_VIGENCIA_VERIFICACION = timedelta(hours=1)
+
 # Extensiones que produce el trámite de renovación y que el usuario debe
 # resguardar. La .key NUEVA es la crítica: el .cer se puede volver a bajar del
 # SAT, la llave privada no.
@@ -112,6 +116,9 @@ Contenido:
   .ren  — solicitud de renovación que se envió al SAT
   .cer  — certificado nuevo emitido por el SAT (si el trámite ya concluyó)
   .pdf  — acuse del trámite (si el SAT ya lo entregó)
+
+Si hay más de una .key es porque el SAT rechazó una solicitud y se generó otra.
+Consérvalas todas.{llave}
 """
 
 
@@ -321,14 +328,60 @@ def _ren_reutilizable(rfc: str) -> Optional[dict]:
     if ren_prev and key_prev and Path(ren_prev).exists() and Path(key_prev).exists():
         return {"ren": ren_prev, "key": key_prev,
                 "solicitado_en": pendiente.get("solicitado_en")}
-    config_store.clear_renovacion_pendiente(rfc)
+    # No se limpia aquí: al generar se reescribe conservando las llaves anteriores.
     return None
+
+
+def _serie_sat(cer_path: str) -> str:
+    """Número de serie de 20 dígitos (como lo publica el SAT) de un `.cer`."""
+    from cryptography import x509
+
+    n = x509.load_der_x509_certificate(Path(cer_path).read_bytes()).serial_number
+    h = f"{n:x}"
+    return bytes.fromhex(h.zfill(len(h) + len(h) % 2)).decode("ascii")
+
+
+def _llaves_anteriores(pendiente: dict) -> list[str]:
+    """Las `.key` de solicitudes rechazadas del trámite que siguen en disco."""
+    return [a["key_path"] for a in pendiente.get("anteriores") or []
+            if a.get("key_path") and Path(a["key_path"]).exists()]
+
+
+def _validar_otra(rfc: str):
+    """
+    Candado de "generar otra solicitud": solo si el SAT rechazó la pendiente por
+    "solicitud anterior" y una búsqueda reciente confirmó que no ha emitido nada
+    después de la e.firma vigente. En cualquier otro caso se perdería de vista
+    una llave que quizá sí tiene certificado.
+    """
+    p = config_store.get_renovacion_pendiente(rfc) or {}
+    if not p.get("rechazada_en") or p.get("numero_operacion"):
+        raise HTTPException(
+            status_code=409,
+            detail="El SAT no ha rechazado la solicitud pendiente: no hace falta generar otra.",
+        )
+    verificada = p.get("verificada_en")
+    if not verificada or (
+        datetime.now() - datetime.fromisoformat(verificada) > _VIGENCIA_VERIFICACION
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Antes de generar otra solicitud, busca tu certificado nuevo para "
+                "confirmar que el SAT no lo ha emitido."
+            ),
+        )
 
 
 def _generar_ren(rfc: str, fiel: FIEL, password: str, correo: Optional[str],
                  salida: str, reusar: Optional[dict]) -> tuple[str, str]:
     """Genera (o reutiliza) el `.ren` + la `.key` nueva y deja la etapa
-    "generada" persistida ANTES de cualquier envío. → (ren_path, key_nueva)."""
+    "generada" persistida ANTES de cualquier envío. → (ren_path, key_nueva).
+    Las llaves de solicitudes anteriores se conservan en `anteriores`."""
+    previo = config_store.get_renovacion_pendiente(rfc) or {}
+    anteriores = list(previo.get("anteriores") or [])
+    if not reusar and previo.get("key_path"):
+        anteriores.append({k: previo.get(k) for k in ("ren_path", "key_path", "solicitado_en")})
     if reusar:
         ren_path, key_nueva = str(reusar["ren"]), str(reusar["key"])
     else:
@@ -346,8 +399,9 @@ def _generar_ren(rfc: str, fiel: FIEL, password: str, correo: Optional[str],
         "acuse_pdf": None,
         "ren_path": ren_path,
         "key_path": key_nueva,
-        **({"solicitado_en": reusar["solicitado_en"]}
-           if reusar and reusar.get("solicitado_en") else {}),
+        **({"anteriores": anteriores} if anteriores else {}),
+        **({k: previo[k] for k in ("solicitado_en", "rechazada_en", "verificada_en")
+            if previo.get(k)} if reusar else {}),
     })
     return ren_path, key_nueva
 
@@ -364,11 +418,20 @@ def renovar_generar(req: RenovarGenerarRequest):
     en el espacio en línea) sin mandar nada al SAT, para que el usuario baje el
     respaldo (`GET /renovar/respaldo`) antes de enviar. Síncrono (<1 s) e
     idempotente: si ya hay una solicitud generada, la devuelve tal cual.
-    `POST /renovar` reutiliza después estos mismos archivos.
+    `POST /renovar` reutiliza después estos mismos archivos. Con `otra=true`
+    genera una NUEVA (el SAT rechazó la anterior, ver `_validar_otra`) sin borrar
+    los archivos de la anterior.
     """
     rfc = req.rfc.strip().upper()
     _, fiel = _validar_renovable(rfc, req.password)
-    reusar = _ren_reutilizable(rfc)
+    if jobs.registry.hay_activo():
+        raise HTTPException(
+            status_code=409,
+            detail="Ya hay una operación en curso. Espera a que termine o cancélala.",
+        )
+    if req.otra:
+        _validar_otra(rfc)
+    reusar = None if req.otra else _ren_reutilizable(rfc)
     _generar_ren(rfc, fiel, req.password, req.correo, _salida_renovacion(rfc), reusar)
     return {
         "rfc": rfc,
@@ -404,6 +467,7 @@ def renovar_efirma(req: RenovarRequest):
 
     def factory(emitir_fase):
         def run():
+            from ...portal.csd import SolicitudAnteriorError
             from ...portal.renovacion import enviar_renovacion_fiel
 
             emitir_fase("generando")
@@ -445,6 +509,14 @@ def renovar_efirma(req: RenovarRequest):
                     on_progreso=puente,
                 )
             except Exception as e_envio:
+                rechazada = isinstance(e_envio, SolicitudAnteriorError)
+                if rechazada:
+                    actual = config_store.get_renovacion_pendiente(rfc) or {}
+                    config_store.set_renovacion_pendiente(rfc, {
+                        **actual,
+                        "rechazada_en": datetime.now().isoformat(timespec="seconds"),
+                        "verificada_en": None,
+                    })
                 # Fallback: quizá un envío (este o uno previo que quedó en etapa
                 # "generada") SÍ fue procesado por el SAT sin que alcanzáramos a
                 # leer el número de operación — en ese caso el reenvío rebota.
@@ -459,6 +531,8 @@ def renovar_efirma(req: RenovarRequest):
                     empresa, password, salida, key_nueva, emitir_fase,
                 )
                 if cer_rescatado is None:
+                    if rechazada:
+                        emitir_fase("rechazada")   # la UI ofrece buscar / generar otra
                     raise e_envio  # error real de envío: no hay trámite procesado
                 logger.info(
                     "[renovar %s] el SAT ya había procesado la renovación; se "
@@ -530,9 +604,10 @@ def renovar_estado(rfc: str):
         "numero_operacion": pendiente.get("numero_operacion"),
         "solicitado_en": pendiente.get("solicitado_en"),
         # El SAT ya recibió: regenerar duplicaría el trámite.
-        "reintento_seguro": etapa == "generada",
+        "reintento_seguro": etapa == "generada" and not pendiente.get("rechazada_en"),
+        "rechazada": bool(pendiente.get("rechazada_en")),
         "siguiente_paso": (
-            "recuperar" if etapa == "enviada"
+            "recuperar" if etapa == "enviada" or pendiente.get("rechazada_en")
             else "reintentar" if etapa == "generada"
             else None
         ),
@@ -568,6 +643,9 @@ def renovar_respaldo(rfc: str):
             detail="No hay archivos de renovación para este RFC.",
         )
 
+    key_path = (config_store.get_renovacion_pendiente(rfc) or {}).get("key_path")
+    llave = f" La de la solicitud más reciente es:\n  {Path(key_path).name}" if key_path else ""
+
     import tempfile
     import zipfile
 
@@ -580,7 +658,7 @@ def renovar_respaldo(rfc: str):
         with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in archivos:
                 zf.write(f, f.name)
-            zf.writestr("LÉEME.txt", _LEEME_RESPALDO_RENOVACION.format(rfc=rfc))
+            zf.writestr("LÉEME.txt", _LEEME_RESPALDO_RENOVACION.format(rfc=rfc, llave=llave))
     except Exception:
         os.unlink(tmp.name)
         raise
@@ -612,8 +690,11 @@ def renovar_recuperar(req: RenovarRecuperarRequest):
             status_code=404,
             detail="No hay una renovación pendiente de descargar para este RFC.",
         )
-    key_nueva = pendiente.get("key_path")
-    if not key_nueva or not Path(key_nueva).exists():
+    # También valen las llaves de solicitudes que el SAT rechazó: si emitió el
+    # certificado de alguna, se instala con SU llave.
+    llaves = [k for k in (pendiente.get("key_path"), *_llaves_anteriores(pendiente))
+              if k and Path(k).exists()]
+    if not llaves:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -626,25 +707,61 @@ def renovar_recuperar(req: RenovarRecuperarRequest):
     empresa = _credenciales_keychain(rfc)
     password = empresa["password"]
     enviada = bool(pendiente.get("numero_operacion"))
+    rechazada = bool(pendiente.get("rechazada_en")) and not enviada
     salida = _salida_renovacion(rfc)
 
     def factory(emitir_fase, pedir_captcha):
         def run():
+            from ...portal.csd import _mismo_par
             from ...portal.recuperacion_publica import recuperar_cert_emparejado
 
+            series: list[str] = []
+
+            def puente(fase, data):
+                series.extend(data.get("series") or [])
+                emitir_fase(fase, {k: v for k, v in data.items() if k != "series"})
+
             cer = recuperar_cert_emparejado(
-                rfc, key_nueva, password, pedir_captcha, salida,
-                on_progreso=emitir_fase,
+                rfc, llaves[0], password, pedir_captcha, salida,
+                on_progreso=puente, llaves_extra=llaves[1:],
             )
             renovada = False
             vencimiento = None
             if cer:
                 emitir_fase("guardando")
-                _instalar_efirma_renovada(rfc, str(cer), key_nueva, password)
+                der = Path(cer).read_bytes()
+                llave = next((k for k in llaves
+                              if _mismo_par(der, Path(k).read_bytes(), password)), llaves[0])
+                _instalar_efirma_renovada(rfc, str(cer), llave, password)
                 renovada = True
                 vencimiento = config_store.get_empresa(rfc).get("vencimiento")
             mensaje = None
-            if not renovada:
+            # Solo se puede generar otra si la e.firma vigente es la más reciente
+            # que publica el SAT. Con una más nueva, o sin poder comprobarlo, no.
+            puede_generar_otra = False
+            if not renovada and rechazada:
+                try:
+                    puede_generar_otra = bool(series) and (
+                        series[0] == _serie_sat(empresa["cer_path"])
+                    )
+                except (OSError, ValueError) as e:
+                    logger.warning("[renovar %s] no se leyó la serie vigente: %s", rfc, e)
+                actual = config_store.get_renovacion_pendiente(rfc) or {}
+                config_store.set_renovacion_pendiente(rfc, {
+                    **actual,
+                    "verificada_en": datetime.now().isoformat(timespec="seconds")
+                    if puede_generar_otra else None,
+                })
+                mensaje = (
+                    "El SAT rechazó tu solicitud por pertenecer a una anterior y no ha "
+                    "emitido un certificado nuevo: tu e.firma actual sigue siendo la más "
+                    "reciente. Puedes generar otra solicitud."
+                    if puede_generar_otra else
+                    "No pudimos confirmar que el SAT no haya emitido ya un certificado, así "
+                    "que por seguridad no generamos otra solicitud. Vuelve a buscarlo más "
+                    "tarde o acláralo con el SAT."
+                )
+            elif not renovada:
                 mensaje = (
                     "El SAT todavía no publica tu certificado nuevo. Suele tardar unos "
                     "minutos después de enviar la renovación: vuelve a intentarlo más tarde."
@@ -661,6 +778,8 @@ def renovar_recuperar(req: RenovarRecuperarRequest):
                 "numero_operacion": pendiente.get("numero_operacion"),
                 "acuse_pdf": pendiente.get("acuse_pdf"),
                 "mensaje": mensaje,
+                "rechazada": rechazada,
+                "puede_generar_otra": puede_generar_otra,
             }
         return run
 

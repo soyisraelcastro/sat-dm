@@ -12,6 +12,10 @@ _Cambios mergeados a `main` aún no etiquetados; el release de la semana los pro
   import en `portal/csd.py` (`name 'os' is not defined`). Además se cierra la sesión del SAT
   al terminar, el tope de sesiones se avisa con un mensaje claro en vez de reintentar, y una
   página colgada tras subir el archivo ya no tapa el error real.
+- **Renovación de e.firma atorada en "solicitud anterior".** Si el SAT rechaza el archivo con
+  ese aviso, la app ya no reenvía el mismo sin fin: busca si el certificado se emitió (con
+  cualquiera de las llaves del trámite) y, si no, permite generar otra solicitud conservando la
+  llave anterior. Además espera hasta 4 minutos (antes 1) el número de operación.
 
 ## [2.5.0] - 2026-10-23
 

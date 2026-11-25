@@ -392,6 +392,8 @@ export interface RenovacionPendiente {
   ren_path?: string;
   key_path: string;
   solicitado_en: string;
+  /** El SAT rechazó este archivo por "solicitud anterior": reenviarlo no sirve. */
+  rechazada_en?: string | null;
 }
 
 export interface CsdInfo {
@@ -417,6 +419,8 @@ export interface RenovarRequest {
 export interface RenovarGenerarRequest {
   rfc: string;
   password: string;
+  /** El SAT rechazó la anterior: generar una nueva (exige haber buscado el cert). */
+  otra?: boolean;
   correo?: string;
 }
 
@@ -444,6 +448,10 @@ export interface RenovarResultado {
   cer_pendiente: boolean;
   /** Mensaje para el usuario cuando el cert no se encontró (recuperación pública). */
   mensaje?: string | null;
+  /** El SAT rechazó la solicitud pendiente por "solicitud anterior". */
+  rechazada?: boolean;
+  /** Se confirmó que el SAT no emitió nada: se puede generar otra solicitud. */
+  puede_generar_otra?: boolean;
 }
 
 // POST /csd
