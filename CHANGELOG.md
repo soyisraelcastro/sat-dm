@@ -6,7 +6,18 @@
 
 _Cambios mergeados a `main` aún no etiquetados; el release de la semana los promueve._
 
-### Fix
+## [2.5.1] - 2026-11-25
+
+### Feature
+
+- **Contabilidad electrónica.** Pantalla nueva (`/contabilidad`) para enviar los ZIP con la
+  e.firma (revisión previa, validación sin enviar y confirmación antes del envío) y consultar
+  los acuses de recepción y aceptación.
+- **Enviar la DIOT desde la app y ver las presentadas.** `/diot` ahora elige entre generar el TXT
+  o enviar la declaración, con el TXT de TodoConta o uno propio. `/diot/presentadas` muestra
+  estatus, declaración, Excel y acuse.
+
+### Bug fix
 
 - **Renovar e.firma y tramitar CSD fallaban antes de subir el archivo al SAT.** Faltaba un
   import en `portal/csd.py` (`name 'os' is not defined`). Además se cierra la sesión del SAT
@@ -16,6 +27,18 @@ _Cambios mergeados a `main` aún no etiquetados; el release de la semana los pro
   ese aviso, la app ya no reenvía el mismo sin fin: busca si el certificado se emitió (con
   cualquiera de las llaves del trámite) y, si no, permite generar otra solicitud conservando la
   llave anterior. Además espera hasta 4 minutos (antes 1) el número de operación.
+- **Carga patronal: las cuotas de IMSS e Infonavit son las del mes.** Se calculaban por un día y
+  se mostraban como mensuales; además se agregan Retiro y Gastos médicos de pensionados, y se
+  corrigen la cuota fija de Enfermedad y Maternidad, el ISN y la tabla de Cesantía y Vejez 2026.
+- **DIOT: se elige el tipo de complementaria al presentar** (portal v2), y el acuse de la
+  presentación ya no sale con la ruta vacía.
+- **Organizador: rutas inválidas con mensaje claro** en vez de "Permission denied: 'C:'"; en la
+  web avisa que se usa en la app de escritorio.
+
+### Tooling
+
+- Cotización PDF de ops con la marca Señal.
+- Bump 2.5.0 → 2.5.1 (3 archivos).
 
 ## [2.5.0] - 2026-10-23
 
