@@ -25,7 +25,7 @@ import logging
 import re
 import ssl
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import requests
 import urllib3
@@ -204,25 +204,28 @@ def recuperar_cert_emparejado(
     directorio_salida: str,
     on_progreso: Optional[Callable[[str, dict], None]] = None,
     max_candidatos: int = 15,
+    llaves_extra: Sequence[str] = (),
 ) -> Optional[Path]:
     """
     Busca entre los certificados públicos del RFC el que empareja con
     `key_nueva_path` y lo guarda como `{serie}.cer` en `directorio_salida`.
-    Devuelve la ruta, o None si el SAT todavía no lo publica.
+    Devuelve la ruta, o None si el SAT todavía no lo publica. `llaves_extra`:
+    otras `.key` del mismo trámite (solicitudes anteriores) que también valen.
+    "recuperando" trae en `series` las FIEL que publica el SAT, de la más reciente a la más vieja.
     """
     def emitir(fase: str, **data):
         if on_progreso:
             on_progreso(fase, data)
 
-    key_bytes = Path(key_nueva_path).read_bytes()
+    llaves = [Path(k).read_bytes() for k in (key_nueva_path, *llaves_extra)]
     emitir("consultando")
     series = buscar_series(rfc, pedir_captcha, tipo="FIEL")
     logger.info("[recuperacion] %s: %d certificados públicos", rfc, len(series))
 
-    emitir("recuperando", candidatos=min(len(series), max_candidatos))
+    emitir("recuperando", candidatos=min(len(series), max_candidatos), series=series)
     for serie in series[:max_candidatos]:
         cer = bajar_cer(serie)
-        if cer and _mismo_par(cer, key_bytes, password):
+        if cer and any(_mismo_par(cer, k, password) for k in llaves):
             emitir("cer", serie=serie)
             out = Path(directorio_salida)
             out.mkdir(parents=True, exist_ok=True)

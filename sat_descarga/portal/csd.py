@@ -21,9 +21,11 @@ e.firma no tiene captcha). Requiere playwright (+ chromium).
 
 import datetime
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
+from ..core.errores import ErrorEsperado
 from .login import iniciar_sesion_fiel
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ CSD_URL_ENTRADA_FIEL = (
 # login (loginc.mat...), así que un `in url` da falso positivo y "aterriza" sin
 # haber entrado (bug detectado en prueba 3).
 CSD_LANDING_HOST = "aplicacionesc.mat.sat.gob.mx"
+# Cierre de sesión del NIDP (ruta estándar del proveedor de identidad).
+NIDP_LOGOUT_URL = "https://loginc.mat.sat.gob.mx/nidp/app/logout"
+# Lo que muestra el NIDP cuando el contribuyente juntó demasiadas sesiones abiertas.
+_TEXTO_TOPE_SESIONES = "maximum number of allowable sessions"
 
 
 def _aterrizo_en_certisat(url: str) -> bool:
@@ -69,6 +75,17 @@ def _mismo_par(cer_der: bytes, key_bytes: bytes, password: str) -> bool:
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
     return spki(cert.public_key()) == spki(key.public_key())
+
+
+# Espera del número de operación tras subir el archivo: el SAT suele tardar
+# segundos, pero si cortamos antes de tiempo el trámite queda sin número.
+_ESPERA_NUMERO_MS = 240_000
+_TXT_SOLICITUD_ANTERIOR = "pertenece a una solicitud anterior"
+_TXT_ERROR_SOLICITUD = "error durante su solicitud"
+
+
+class SolicitudAnteriorError(ErrorEsperado):
+    """El SAT ya tiene registrado ESTE archivo: reenviarlo siempre rebota."""
 
 
 class CSDPortalClient:
@@ -181,6 +198,7 @@ class CSDPortalClient:
                     self._emitir("cer", path=str(cer) if cer else None)
                 return res
             finally:
+                self._cerrar_sesion(context)
                 browser.close()
 
     def recuperar(
@@ -217,6 +235,7 @@ class CSDPortalClient:
                 self._emitir("cer", path=str(cer) if cer else None)
                 return {"cer": cer}
             finally:
+                self._cerrar_sesion(context)
                 browser.close()
 
     # ------------------------------------------------------------------
@@ -243,6 +262,8 @@ class CSDPortalClient:
                 return
             except RuntimeError as e:
                 ultimo = e
+            # Con el tope de sesiones, reintentar solo lo prolonga.
+            self._revisar_tope_sesiones(page)
             # Recuperación rápida: si quedamos en el NIDP (autenticados pero sin
             # aterrizar), forzar el home de CertiSAT con la sesión ya establecida.
             if "loginc.mat.sat.gob.mx" in page.url:
@@ -254,14 +275,35 @@ class CSDPortalClient:
                         return
                 except PWTimeout:
                     pass
+                self._revisar_tope_sesiones(page)
             logger.warning("[%s] login intento %d/%d no aterrizó (%s); reintento…",
                            self.ETIQUETA, intento, intentos, page.url[:70])
         raise RuntimeError(f"No se pudo entrar a CertiSAT tras {intentos} intentos: {ultimo}")
 
+    def _revisar_tope_sesiones(self, page):
+        """Lanza `ErrorEsperado` si el NIDP rechazó el login por tope de sesiones."""
+        try:
+            texto = page.inner_text("body", timeout=5_000)
+        except Exception:  # noqa: BLE001 — sin pantalla legible no hay nada que revisar
+            return
+        if _TEXTO_TOPE_SESIONES in texto.lower():
+            raise ErrorEsperado(
+                "El SAT tiene demasiadas sesiones abiertas con esta e.firma. Espera "
+                "alrededor de una hora sin entrar al portal y vuelve a intentarlo."
+            )
+
+    def _cerrar_sesion(self, context):
+        """Cierra la sesión del NIDP (best-effort): cerrar el navegador no la libera en
+        el SAT y, al juntarse varias, el portal rechaza los logins siguientes."""
+        try:
+            page = context.new_page()
+            page.goto(NIDP_LOGOUT_URL, wait_until="domcontentloaded", timeout=10_000)
+        except Exception as e:  # noqa: BLE001 — nunca debe tapar el resultado del trámite
+            logger.info("[%s] no se pudo cerrar la sesión del SAT: %s", self.ETIQUETA, e)
+
     def _subir_sdg(self, page, sdg_path: str) -> str:
         """Sube el archivo del trámite (`.sdg`/`.ren`) y devuelve el número de
         operación (o lanza si el SAT no lo dio)."""
-        import os
         from playwright.sync_api import TimeoutError as PWTimeout
 
         page.goto(self.MENU_URL, wait_until="domcontentloaded")
@@ -271,13 +313,30 @@ class CSDPortalClient:
         page.click('input[name="enviar"]', no_wait_after=True)
 
         try:
-            page.wait_for_selector('input[name="numeroOperacion"]', timeout=60_000)
+            # El número, o el rechazo del SAT (para no agotar la espera).
+            page.wait_for_selector(
+                'input[name="numeroOperacion"]:visible, '
+                f':text("{_TXT_SOLICITUD_ANTERIOR}"):visible, '
+                f':text("{_TXT_ERROR_SOLICITUD}"):visible',
+                timeout=_ESPERA_NUMERO_MS,
+            )
+            con_numero = page.locator('input[name="numeroOperacion"]').count() > 0
         except PWTimeout:
-            cuerpo = (page.inner_text("body")[:400] if page else "").strip()
+            con_numero = False
+        if not con_numero:
+            try:
+                cuerpo = page.inner_text("body", timeout=5_000)[:2000].strip()
+            except Exception:  # noqa: BLE001 — la página colgada no debe tapar el error
+                cuerpo = "(la página del SAT no respondió)"
+            if _TXT_SOLICITUD_ANTERIOR in " ".join(cuerpo.lower().split()):
+                raise SolicitudAnteriorError(
+                    "El SAT rechazó el archivo porque pertenece a una solicitud anterior: "
+                    "ya lo tiene registrado y reenviarlo no sirve."
+                )
             raise RuntimeError(
                 "El SAT no devolvió número de operación tras subir el archivo. "
-                "A veces es un error transitorio del portal; reintenta. "
-                f"Pantalla: «{cuerpo}»"
+                "Pudo haber recibido la solicitud: antes de reintentar, revisa si ya "
+                f'emitió tu certificado. Pantalla: "{cuerpo}"'
             )
         # El SAT rinde el número en un input visible Y uno hidden (mismo valor) →
         # `.first` evita el strict-mode violation de Playwright.
