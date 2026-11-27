@@ -6,6 +6,32 @@
 
 _Cambios mergeados a `main` aún no etiquetados; el release de la semana los promueve._
 
+## [2.6.0] - 2026-11-27
+
+### Feature
+
+- **Navegación por espacios para todos.** La app abre con los 5 espacios por default en
+  escritorio y web (`NAV_ESPACIOS_PARA_TODOS`). Quien eligió la clásica en Ajustes > Apariencia >
+  Navegación la conserva, y a quien venía usándola le sale una sola vez el aviso "TodoConta
+  tiene nueva navegación" con el botón **Volver a la clásica**. Las cuentas nuevas y en prueba
+  ya arrancaban en espacios y no lo ven.
+- **Black Friday en Suscripción.** Con la promo activa (`venta.promo` de la licencia), la
+  pantalla muestra el aviso, el precio anual tachado y el del primer año con 50%, y el total con
+  descuento. Se apaga sola el 1 de diciembre.
+
+### Bug fix
+
+- **Descargar una solicitud WS en la web.** El poller ya la había bajado al espacio en línea y
+  "Volver a descargar" se la volvía a pedir al SAT, que respondía el paquete vacío. Ahora
+  `/descargar` devuelve lo que ya está descargado sin ir al SAT, y en la web el botón dice
+  "Bajar ZIP a mi equipo" y baja la carpeta como ZIP (en escritorio, "Abrir carpeta").
+
+### Tooling
+
+- La prueba de la descarga ya bajada se salta si no está FastAPI (el CI corre sin el extra
+  `server`).
+- Bump 2.5.1 → 2.6.0 (3 archivos).
+
 ## [2.5.1] - 2026-11-25
 
 ### Feature
