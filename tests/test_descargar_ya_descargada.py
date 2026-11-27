@@ -4,7 +4,11 @@ El poller baja los paquetes solo; si después el usuario pide la descarga, el SA
 responde el paquete "vacío" (ya lo entregó). La guarda devuelve lo que ya hay.
 """
 
-from sat_descarga.api.routers import webservice as ws
+import pytest
+
+pytest.importorskip("fastapi")  # el router importa FastAPI; el CI corre sin el extra server
+
+from sat_descarga.api.routers import webservice as ws  # noqa: E402
 
 
 def _cat(monkeypatch, sol):
