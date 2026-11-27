@@ -109,15 +109,21 @@ def init_sentry() -> bool:
         pass
 
     environment = _environment()
-    sentry_sdk.init(
-        dsn=dsn,
-        release=_release(),
-        environment=environment,
-        send_default_pii=False,
-        max_request_body_size="never",
-        before_send=_before_send,
-        integrations=integrations,
-    )
+    try:
+        sentry_sdk.init(
+            dsn=dsn,
+            release=_release(),
+            environment=environment,
+            send_default_pii=False,
+            max_request_body_size="never",
+            before_send=_before_send,
+            integrations=integrations,
+        )
+    except Exception:  # noqa: BLE001 — la telemetría nunca debe tumbar el agente
+        # Pasó con sentry-sdk 3.0 (opciones que ya no existen): el agente no
+        # arrancaba y la web y el escritorio se quedaban sin servicio.
+        logger.exception("No se pudo iniciar Sentry; telemetría apagada.")
+        return False
     _inicializado = True
     logger.info("Telemetría Sentry activada (environment=%s).", environment)
     return True
