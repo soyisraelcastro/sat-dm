@@ -18,9 +18,13 @@ WORKDIR /app
 
 # Código + dependencias: extras server (FastAPI/uvicorn) y ciec (Playwright).
 # `--with-deps` instala las librerías de sistema que Chromium headless necesita.
+# libatomic1 va antes: desde Playwright 1.65 (nov 2026) su `node` interno la pide
+# y python:3.12-slim no la trae; sin ella `playwright` no arranca (exit 127).
 COPY pyproject.toml ./
 COPY sat_descarga/ sat_descarga/
-RUN pip install --no-cache-dir ".[server,ciec]" \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && pip install --no-cache-dir ".[server,ciec]" \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
