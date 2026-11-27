@@ -125,6 +125,8 @@ export function SuscripcionV3() {
 
   const codigo = plan?.codigo;
   const suscrito = license.plan === 'premium';
+  // Black Friday 2026: el servidor aplica el cupón solo en el anual; aquí solo se anuncia.
+  const promo = license.venta?.promo ?? null;
   const esFundador = license.is_founder === true || license.plan === 'founder';
   const situacion: Situacion =
     suscrito && codigo && PLANES_V3_PAGO.includes(codigo)
@@ -159,11 +161,15 @@ export function SuscripcionV3() {
   const planDeEquipo = license.plan_de_equipo === true;
   const admiteElegido = !!catalogoElegido && admiteUsuariosAdicionales(catalogoElegido.codigo);
   const adicionalesElegidos = admiteElegido ? adicionales : 0;
+  // Black Friday: solo el plan anual lleva descuento (los usuarios adicionales no).
+  const conPromo = (monto: number, iv: IntervaloPlan) =>
+    promo && iv === 'anual' ? Math.round(monto * (1 - promo.porcentaje / 100)) : monto;
   const totalElegido = catalogoElegido
-    ? precioDe(catalogoElegido, intervalo) + adicionalesElegidos * PRECIO_USUARIO_ADICIONAL[intervalo]
+    ? conPromo(precioDe(catalogoElegido, intervalo), intervalo) +
+      adicionalesElegidos * PRECIO_USUARIO_ADICIONAL[intervalo]
     : 0;
   const totalAnualElegido = catalogoElegido
-    ? catalogoElegido.precioAnual + adicionalesElegidos * PRECIO_USUARIO_ADICIONAL.anual
+    ? conPromo(catalogoElegido.precioAnual, 'anual') + adicionalesElegidos * PRECIO_USUARIO_ADICIONAL.anual
     : 0;
 
   // ── Acciones ──────────────────────────────────────────────────────────────
@@ -500,6 +506,14 @@ export function SuscripcionV3() {
                 <SelectorIntervalo valor={intervalo} onCambio={cambiarIntervalo} />
               </div>
 
+              {promo && situacion !== 'v3' && (
+                <div className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm">
+                  <span className="font-semibold">Black Friday: {promo.porcentaje}% el primer año</span> en
+                  Esencial, Pro y Completo anuales, hasta el {formatDate(new Date(new Date(promo.hasta).getTime() - 1).toISOString())}.
+                  Sin código: se aplica solo al pagar.
+                </div>
+              )}
+
               <div className="grid gap-4 md:grid-cols-3">
                 {CATALOGO_V3.map((p) => {
                   const esActual = situacion === 'v3' && p.codigo === codigo;
@@ -517,6 +531,7 @@ export function SuscripcionV3() {
                       key={p.codigo}
                       plan={p}
                       intervalo={intervalo}
+                      promoPct={promo && situacion !== 'v3' && intervalo === 'anual' ? promo.porcentaje : null}
                       seleccionado={catalogoElegido?.codigo === p.codigo}
                       etiqueta={
                         esActual
@@ -558,7 +573,7 @@ export function SuscripcionV3() {
               </div>
               {adicionalesElegidos > 0 && (
                 <p className="-mt-3 text-xs text-muted-foreground tabular-nums">
-                  {catalogoElegido.nombre} {formatPesosEnteros(precioDe(catalogoElegido, intervalo))} +{' '}
+                  {catalogoElegido.nombre} {formatPesosEnteros(conPromo(precioDe(catalogoElegido, intervalo), intervalo))} +{' '}
                   {adicionalesTexto(adicionalesElegidos)}{' '}
                   {formatPesosEnteros(adicionalesElegidos * PRECIO_USUARIO_ADICIONAL[intervalo])}
                 </p>
@@ -777,6 +792,7 @@ function SelectorIntervalo({
 function TarjetaPlan({
   plan,
   intervalo,
+  promoPct,
   seleccionado,
   etiqueta,
   cta,
@@ -786,6 +802,8 @@ function TarjetaPlan({
 }: {
   plan: PlanV3Catalogo;
   intervalo: IntervaloPlan;
+  /** % de la promoción vigente (Black Friday) o null. */
+  promoPct?: number | null;
   seleccionado: boolean;
   etiqueta?: string;
   cta: string;
@@ -806,10 +824,24 @@ function TarjetaPlan({
       </div>
       <p className="text-[13px] leading-snug text-muted-foreground">{plan.lema}</p>
       <div className="flex items-baseline gap-1.5 whitespace-nowrap">
-        <span className="text-[28px] leading-none font-extrabold tracking-tight tabular-nums">
-          {formatPesosEnteros(precioDe(plan, intervalo))}
-        </span>
-        <span className="text-[13px] text-muted-foreground">{sufijoIntervalo(intervalo)}</span>
+        {promoPct ? (
+          <>
+            <s className="text-[15px] text-muted-foreground tabular-nums">
+              {formatPesosEnteros(precioDe(plan, intervalo))}
+            </s>
+            <span className="text-[28px] leading-none font-extrabold tracking-tight tabular-nums">
+              {formatPesosEnteros(Math.round(precioDe(plan, intervalo) * (1 - promoPct / 100)))}
+            </span>
+            <span className="text-[13px] text-muted-foreground">el primer año</span>
+          </>
+        ) : (
+          <>
+            <span className="text-[28px] leading-none font-extrabold tracking-tight tabular-nums">
+              {formatPesosEnteros(precioDe(plan, intervalo))}
+            </span>
+            <span className="text-[13px] text-muted-foreground">{sufijoIntervalo(intervalo)}</span>
+          </>
+        )}
       </div>
       <ul className="flex flex-col gap-2 text-[13px]">
         <li className="flex items-center gap-2 font-semibold">
