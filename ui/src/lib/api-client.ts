@@ -2016,6 +2016,10 @@ export interface LicenseStatus {
   usuarios_adicionales?: number;
   /** El plan viene del dueño del equipo: la cuenta es miembro y no lo paga. */
   plan_de_equipo?: boolean;
+  /** Venta (aditivo): promoción que el checkout aplica sola, p. ej. Black Friday 2026. */
+  venta?: {
+    promo?: { codigo: string; porcentaje: number; intervalo: 'anual'; hasta: string };
+  };
   // Flags del cache local del agente.
   from_cache?: boolean;
   stale?: boolean;
