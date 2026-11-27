@@ -23,6 +23,8 @@ import { useEmpresas } from '@/hooks/use-empresas';
 import { useHistorial } from '@/hooks/use-historial';
 import { mensajeDeError } from '@/lib/errores';
 import { resumenDeRespuesta } from '@/lib/servir-base';
+import { abrirODescargar } from '@/lib/descargas';
+import { esWeb } from '@/lib/modo';
 import type { ResumenServido } from '@/lib/types';
 
 /**
@@ -67,6 +69,7 @@ export default function DescargaPage() {
     numeroCfdis,
     packageIds,
     archivosDescargados,
+    rutaDescarga,
     error,
     resumen,
     solicitar,
@@ -124,8 +127,13 @@ export default function DescargaPage() {
   // usuario quiere re-bajar el ZIP de una ya descargada.
   const handleDescargarFromList = useCallback(
     async (idSolicitud: string) => {
-      await apiClient.descargar(idSolicitud);
+      const res = await apiClient.descargar(idSolicitud);
       refreshSolicitudes();
+      // Web: los CFDIs quedan en el espacio del usuario → se bajan como ZIP en el
+      // mismo clic. Desktop: si ya estaba descargada, se abre su carpeta.
+      if (res.ruta && (esWeb() || res.ya_descargada)) {
+        await abrirODescargar(apiClient, res.ruta, 'carpeta');
+      }
     },
     [apiClient, refreshSolicitudes],
   );
@@ -471,6 +479,9 @@ export default function DescargaPage() {
               isDownloading={state === 'downloading'}
               archivosDescargados={archivosDescargados}
               numeroCfdis={numeroCfdis}
+              onAbrirCarpeta={
+                rutaDescarga ? () => void abrirODescargar(apiClient, rutaDescarga, 'carpeta') : null
+              }
             />
           )}
 
