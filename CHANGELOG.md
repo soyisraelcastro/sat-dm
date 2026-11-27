@@ -6,6 +6,21 @@
 
 _Cambios mergeados a `main` aún no etiquetados; el release de la semana los promueve._
 
+## [2.6.1] - 2026-11-27
+
+### Bug fix
+
+- **El agente no arrancaba en 2.6.0 (escritorio y web).** La imagen del agente y los builds de
+  escritorio instalan las dependencias con `pip` sin el lock, y entró `sentry-sdk` 3.0, que quitó la
+  opción `send_default_pii`: el agente tronaba al iniciar Sentry. Se fija `sentry-sdk<3` y, si
+  Sentry no puede iniciar, la telemetría se apaga y el agente sigue.
+- **La imagen del agente no se construía.** Playwright 1.65 pide `libatomic1`, que
+  `python:3.12-slim` no trae; se instala en el Dockerfile.
+
+### Tooling
+
+- Bump 2.6.0 → 2.6.1 (3 archivos).
+
 ## [2.6.0] - 2026-11-27
 
 ### Feature
