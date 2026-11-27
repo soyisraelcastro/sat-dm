@@ -9,12 +9,14 @@
 //   3. Licencia: si el backend manda `navegacion: 'espacios' | 'clasica'`
 //      (campo aditivo opcional), manda él. Sirve para encenderla por segmento
 //      sin sacar versión.
-//   4. `NAV_ESPACIOS_PARA_TODOS` (fase 2) → espacios.
-//   5. Desde `NAV_ESPACIOS_DEFAULT_DESDE` (2 de noviembre): las cuentas en
+//   4. Desde `NAV_ESPACIOS_DEFAULT_DESDE` (2 de noviembre): las cuentas en
 //      prueba (incluidas las reabiertas y las nuevas, que arrancan en prueba)
 //      → espacios. Esa decisión se recuerda en la instalación
 //      (`tc:navegacion-default`) para que no regresen a la clásica al terminar
 //      la prueba o al pagar.
+//   5. `NAV_ESPACIOS_PARA_TODOS` (fase 2) → espacios. Va después de la prueba
+//      para que el origen `para-todos` marque solo a quien venía de la clásica
+//      (a esos se les avisa una vez cómo volver).
 //   6. Lo demás → clásica.
 // ---------------------------------------------------------------------------
 
@@ -57,11 +59,11 @@ export function resolverModoNavegacion(e: EntradaModo): {
   if (!e.disponible) return { modo: 'clasica', origen: 'apagado' };
   if (e.preferencia) return { modo: e.preferencia, origen: 'preferencia' };
   if (e.licencia) return { modo: e.licencia, origen: 'licencia' };
-  if (e.paraTodos) return { modo: 'espacios', origen: 'para-todos' };
   if (e.recordado) return { modo: 'espacios', origen: 'recordado' };
   if (e.enPrueba && e.ahora.getTime() >= e.desde.getTime()) {
     return { modo: 'espacios', origen: 'prueba' };
   }
+  if (e.paraTodos) return { modo: 'espacios', origen: 'para-todos' };
   return { modo: 'clasica', origen: 'default' };
 }
 

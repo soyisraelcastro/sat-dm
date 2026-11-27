@@ -58,7 +58,9 @@ export const NAV_ESPACIOS_DEFAULT_DESDE: string = '2026-11-02T00:00:00-06:00';
 
 /**
  * Fase 2 del despliegue (navegacion-espacios.md, 8.3): espacios por default
- * para TODOS. Mientras sea `false`, solo las cuentas en prueba y nuevas la
- * reciben por default (desde la fecha de arriba).
+ * para TODOS. Encendida el 27 de noviembre de 2026 (Black Friday: los correos y
+ * videos ya enseñan la navegación nueva). Quien la elija en Ajustes > Apariencia
+ * > Navegación conserva la clásica; quien venía de la clásica ve una vez el aviso
+ * con "Volver a la clásica" (components/layout/aviso-navegacion-nueva.tsx).
  */
-export const NAV_ESPACIOS_PARA_TODOS: boolean = false;
+export const NAV_ESPACIOS_PARA_TODOS: boolean = true;
