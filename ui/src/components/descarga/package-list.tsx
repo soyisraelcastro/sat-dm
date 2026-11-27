@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { esWeb } from '@/lib/modo';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -21,6 +22,12 @@ interface PackageListProps {
   archivosDescargados: string[];
   /** CFDIs encontrados (para el resumen: "N CFDIs en M paquetes"). */
   numeroCfdis?: number | null;
+  /**
+   * Abre la carpeta (desktop) o la baja como ZIP (web). Con ella, el botón tras
+   * la descarga es "Abrir carpeta" / "Bajar ZIP" en vez de volver a pedirle el
+   * paquete al SAT (que ya lo entregó).
+   */
+  onAbrirCarpeta?: (() => void) | null;
 }
 
 // Máximo de archivos a renderizar en la lista (una descarga grande puede traer miles).
@@ -36,6 +43,7 @@ export function PackageList({
   isDownloading,
   archivosDescargados,
   numeroCfdis,
+  onAbrirCarpeta,
 }: PackageListProps) {
   const [verIds, setVerIds] = useState(false);
 
@@ -127,7 +135,16 @@ export function PackageList({
                   {archivosDescargados.length !== 1 ? 's' : ''} exitosamente.
                 </p>
               </div>
-              <Button
+{onAbrirCarpeta ? (
+                <Button variant={esWeb() ? 'default' : 'outline'} size="sm" onClick={onAbrirCarpeta}>
+                  <Icon
+                    icon={esWeb() ? 'ph:download-simple-light' : 'ph:folder-open-light'}
+                    className="size-3.5"
+                  />
+                  {esWeb() ? 'Bajar ZIP a mi equipo' : 'Abrir carpeta'}
+                </Button>
+              ) : (
+                            <Button
                 variant="outline"
                 size="sm"
                 onClick={onDescargar}
@@ -146,6 +163,7 @@ export function PackageList({
                   </>
                 )}
               </Button>
+              )}
             </div>
 
             <Separator />

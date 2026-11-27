@@ -95,6 +95,8 @@ export interface UseDescargaReturn {
   numeroCfdis: number | null;
   packageIds: string[];
   archivosDescargados: string[];
+  /** Carpeta de la última descarga (para bajarla como ZIP en la web o abrirla en la desktop). */
+  rutaDescarga: string | null;
   error: string | null;
   /** Lo que se sirvió de la base en la última solicitud CFDI (null si nada). */
   resumen: ResumenServido | null;
@@ -125,6 +127,7 @@ export function useDescarga(
   const [numeroCfdis, setNumeroCfdis] = useState<number | null>(null);
   const [packageIds, setPackageIds] = useState<string[]>([]);
   const [archivosDescargados, setArchivosDescargados] = useState<string[]>([]);
+  const [rutaDescarga, setRutaDescarga] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resumen, setResumen] = useState<ResumenServido | null>(null);
 
@@ -333,6 +336,8 @@ export function useDescarga(
         setNumeroCfdis(null);
         setPackageIds([]);
         setArchivosDescargados([]);
+    setRutaDescarga(null);
+        setRutaDescarga(null);
         setResumen(null);
 
         // CFDI: primero lo consolidado sale de la base y solo los huecos van al
@@ -389,6 +394,7 @@ export function useDescarga(
       if (!mountedRef.current) return;
 
       setArchivosDescargados(res.archivos);
+      setRutaDescarga(res.ruta ?? null);
       saveRequestId(rfcRef.current, null);
       setState('done');
     } catch (err) {
@@ -420,6 +426,7 @@ export function useDescarga(
     setNumeroCfdis(null);
     setPackageIds([]);
     setArchivosDescargados([]);
+    setRutaDescarga(null);
     setError(null);
     setResumen(null);
     saveRequestId(rfcRef.current, null);
@@ -466,6 +473,7 @@ export function useDescarga(
     setNumeroCfdis(null);
     setPackageIds([]);
     setArchivosDescargados([]);
+    setRutaDescarga(null);
     setError(null);
     setResumen(null);
     autoDescargaDispatchedRef.current = null;
@@ -502,6 +510,7 @@ export function useDescarga(
     numeroCfdis,
     packageIds,
     archivosDescargados,
+    rutaDescarga,
     error,
     resumen,
     solicitar,

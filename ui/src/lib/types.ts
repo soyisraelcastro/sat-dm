@@ -124,6 +124,10 @@ export interface DescargarResponse {
   archivos: string[];
   total: number;
   mensaje?: string;
+  /** Carpeta donde quedaron los CFDIs (registrada en el historial). */
+  ruta?: string;
+  /** true = ya estaba descargada: se devolvió lo que hay sin pedírsela al SAT. */
+  ya_descargada?: boolean;
 }
 
 // POST /descarga-completa — request body

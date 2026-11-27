@@ -10,6 +10,7 @@ import { StatusBadge, type StatusTone } from '@/components/shared/status-badge';
 import { SolicitudRowExpanded } from '@/components/descarga/solicitud-row-expanded';
 import type { Solicitud } from '@/lib/types';
 import { mensajeDeError } from '@/lib/errores';
+import { esWeb } from '@/lib/modo';
 
 // Mapeo del estado SAT (o "solicitada"/"vencida"/"descargada") → tono + ícono.
 // Códigos SAT: 1=En cola · 2=Procesando · 3=Lista · 4=Error · 5=Rechazada ·
@@ -194,7 +195,14 @@ function RowActions({
   if (onDescargar && puedeDescargar) {
     acciones.push({
       icon: busy === 'descargar' ? 'ph:circle-notch-light' : 'ph:download-simple-light',
-      label: s.estado === 'descargada' ? 'Volver a descargar' : 'Descargar',
+      label:
+        s.estado === 'descargada'
+          ? esWeb()
+            ? 'Bajar ZIP a mi equipo'
+            : 'Abrir carpeta'
+          : esWeb()
+            ? 'Descargar y bajar ZIP'
+            : 'Descargar',
       onClick: () => run('descargar', () => onDescargar(s.id_solicitud)),
       disabled: busy !== null,
       iconOnly: true,

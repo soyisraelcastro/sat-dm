@@ -546,6 +546,20 @@ def descargar(
 
         salida = directorio_salida or _salida_descarga_ws(fiel.rfc, id_solicitud)
 
+        # Ya descargada (por el poller en background o una vez anterior) y la
+        # carpeta sigue ahí: se devuelve lo que hay sin volver a pedirle el
+        # paquete al SAT, que ya lo entregó y responde "vacío" la segunda vez.
+        # En la web la UI baja esa carpeta como ZIP (`/descargas/zip?ruta=…`).
+        existentes = _ya_descargada(fiel.rfc, id_solicitud, salida)
+        if existentes is not None:
+            return {
+                "ok": True,
+                "archivos": existentes,
+                "total": len(existentes),
+                "ruta": salida,
+                "ya_descargada": True,
+            }
+
         # Verificar estado actual — la petición DEBE ir firmada (xmldsig) con la FIEL,
         # si no, el SAT devuelve un EstadoSolicitud vacío y se ve como "no está lista".
         try:
@@ -600,6 +614,7 @@ def descargar(
                 "ok": True,
                 "archivos": [str(z) for z in zips],
                 "total": len(zips),
+                "ruta": salida,
             }
         except HTTPException:
             raise
@@ -609,6 +624,24 @@ def descargar(
             raise HTTPException(status_code=500, detail=str(e))
     finally:
         _terminar_descarga_ws(id_solicitud)
+
+
+def _ya_descargada(rfc: str, id_solicitud: str, salida: str) -> Optional[List[str]]:
+    """Archivos de una solicitud que el catálogo ya marca "descargada" y cuya
+    carpeta sigue con archivos; None si hay que pedírsela al SAT."""
+    from ...cli import config_store
+
+    try:
+        sol = config_store.get_solicitud(rfc, id_solicitud) or {}
+    except Exception:  # noqa: BLE001
+        return None
+    if sol.get("estado") != "descargada":
+        return None
+    carpeta = Path(salida)
+    if not carpeta.is_dir():
+        return None
+    archivos = sorted(str(f) for f in carpeta.rglob("*") if f.is_file())
+    return archivos or None
 
 
 @router.post("/descarga-completa")
