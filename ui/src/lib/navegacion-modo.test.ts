@@ -77,6 +77,16 @@ test('fase 2: para todos', () => {
   });
 });
 
+test('fase 2: la prueba y lo recordado conservan su origen (sin aviso de volver)', () => {
+  const prueba = resolverModoNavegacion(entrada({ paraTodos: true, enPrueba: true, ahora: DESPUES }));
+  assert.deepEqual(prueba, { modo: 'espacios', origen: 'prueba' });
+  const recordado = resolverModoNavegacion(entrada({ paraTodos: true, recordado: true }));
+  assert.deepEqual(recordado, { modo: 'espacios', origen: 'recordado' });
+  // Quien eligió la clásica en Ajustes se queda en la clásica.
+  const clasica = resolverModoNavegacion(entrada({ paraTodos: true, preferencia: 'clasica' }));
+  assert.deepEqual(clasica, { modo: 'clasica', origen: 'preferencia' });
+});
+
 test('?labs=espacios y ?labs=clasica, también en lista', () => {
   assert.equal(modoDeLabs('?labs=espacios'), 'espacios');
   assert.equal(modoDeLabs('?labs=csd,espacios'), 'espacios');

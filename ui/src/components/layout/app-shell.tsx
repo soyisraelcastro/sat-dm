@@ -22,6 +22,7 @@ import { useAuth, usePlanesV3 } from '@/providers/auth-provider';
 import { useNavegacion } from '@/providers/navegacion-provider';
 import { useServer } from '@/providers/server-provider';
 import LoginPage from '@/app/login/page';
+import { AvisoNavegacionNueva } from '@/components/layout/aviso-navegacion-nueva';
 
 interface AppShellProps {
   children: ReactNode;
@@ -106,6 +107,8 @@ export function AppShell({ children }: AppShellProps) {
           <StatusBar />
           {/* Atajos de teclado + ⌘K con órdenes: solo con sesión iniciada. */}
           <GlobalShortcuts espacios />
+          {/* Fase 2: a quien venía de la clásica, una vez, cómo volver. */}
+          <AvisoNavegacionNueva />
         </div>
       </EspaciosShellProvider>
     );
